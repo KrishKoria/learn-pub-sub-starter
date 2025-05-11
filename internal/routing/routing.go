@@ -14,3 +14,8 @@ const (
 	ExchangePerilDirect = "peril_direct"
 	ExchangePerilTopic  = "peril_topic"
 )
+
+const (
+	QueueTypeDurable = iota
+	QueueTypeTransient
+)
