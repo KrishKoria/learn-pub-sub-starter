@@ -37,14 +37,16 @@ func DeclareAndBind(
     if err != nil {
         return nil, amqp.Queue{}, fmt.Errorf("cannot open channel: %w", err)
     }
-
+    args := amqp.Table{
+        "x-dead-letter-exchange": routing.ExchangePerilDLX,
+    }
     newQueue, err := ch.QueueDeclare(
 		queueName,                             // name
 		simpleQueueType == routing.QueueTypeDurable, // durable
 		simpleQueueType != routing.QueueTypeDurable, // delete when unused
 		simpleQueueType != routing.QueueTypeDurable, // exclusive
 		false,                                 // no-wait
-		nil,                                   // arguments
+		args,                                   // arguments
 	)
 	if err != nil {
 		return nil, amqp.Queue{}, fmt.Errorf("could not declare queue: %v", err)
