@@ -13,32 +13,65 @@ import (
 )
 
 func main() {
-	fmt.Println("Starting Peril client...")
-	connStr := "amqp://guest:guest@localhost:5672/"
-	conn, err := amqp.Dial(connStr)
-	if err != nil {
-		log.Fatalf("Failed to connect to RabbitMQ: %v", err)
-	}
-	defer conn.Close()
+    fmt.Println("Starting Peril client...")
+    connStr := "amqp://guest:guest@localhost:5672/"
+    conn, err := amqp.Dial(connStr)
+    if err != nil {
+        log.Fatalf("Failed to connect to RabbitMQ: %v", err)
+    }
+    defer conn.Close()
 
-	name, err := gamelogic.ClientWelcome()
-	if err != nil {
+    name, err := gamelogic.ClientWelcome()
+    if err != nil {
         log.Fatalf("Error: %v", err)
     }
-	queuename := routing.PauseKey + "." + name
+    queuename := routing.PauseKey + "." + name
 
-	ch, queue, err := pubsub.DeclareAndBind(conn, routing.ExchangePerilDirect, queuename, routing.PauseKey, routing.QueueTypeTransient)
-	if err != nil {
-		log.Fatalf("Error: %v", err)
-	}
-	if err != nil {
-		log.Fatalf("Error: %v", err)
-	}
-	defer ch.Close()
-	fmt.Printf("Queue %s created and bound to exchange %s with key %s\n", queue.Name, routing.ExchangePerilDirect, routing.PauseKey)
-	
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, os.Interrupt)
-	<-signalChan
+    ch, queue, err := pubsub.DeclareAndBind(
+        conn,
+        routing.ExchangePerilDirect,
+        queuename,
+        routing.PauseKey,
+        routing.QueueTypeTransient,
+    )
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+    defer ch.Close()
+    fmt.Printf("Queue %s created and bound to exchange %s with key %s\n", queue.Name, routing.ExchangePerilDirect, routing.PauseKey)
 
+    gameState := gamelogic.NewGameState(name)
+
+    signalChan := make(chan os.Signal, 1)
+    signal.Notify(signalChan, os.Interrupt)
+
+    for {
+        select {
+        case <-signalChan:
+            gamelogic.PrintQuit()
+            return
+        default:
+            words := gamelogic.GetInput()
+            if len(words) == 0 {
+                continue
+            }
+            switch words[0] {
+            case "spawn":
+                gameState.CommandSpawn(words)
+            case "move":
+                gameState.CommandMove(words)
+            case "status":
+                gameState.CommandStatus()
+            case "help":
+                gamelogic.PrintClientHelp()
+            case "spam":
+                fmt.Println("Spamming not allowed yet!")
+            case "quit":
+                gamelogic.PrintQuit()
+                return
+            default:
+                fmt.Println("Unknown command:", words[0])
+            }
+        }
+    }
 }

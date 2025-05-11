@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
@@ -25,13 +26,44 @@ func main() {
 	if err != nil {
 		log.Fatalf("Cannot Open Message channel")
 	}
-	err = pubsub.PublishJSON(msg, string(routing.ExchangePerilDirect), string(routing.PauseKey), routing.PlayingState{IsPaused: true})
-	if err != nil {
-		log.Fatalf("Cannot Publish messages")
-	}
+	defer msg.Close()
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
-	<-sigChan
-	fmt.Println("Received shutdown signal, shutting down...")
+	
+	gamelogic.PrintServerHelp()
+	loop:
+    for {
+        select {
+        case <-sigChan:
+            fmt.Println("Received shutdown signal, shutting down...")
+            break loop
+        default:
+            words := gamelogic.GetInput()
+            if len(words) == 0 {
+                continue
+            }
+            switch words[0] {
+            case "pause":
+                log.Println("Sending pause message")
+                sendMessage(msg, true)
+            case "resume":
+                log.Println("Sending resume message")
+                sendMessage(msg, false)
+            case "quit":
+                log.Println("Exiting...")
+                break loop
+            default:
+                log.Println("Unknown Command")
+            }
+        }
+    }
+}
+
+
+func sendMessage(channel *amqp.Channel, state bool) {
+	err := pubsub.PublishJSON(channel, string(routing.ExchangePerilDirect), string(routing.PauseKey), routing.PlayingState{IsPaused: state})
+	if err != nil {
+		log.Fatalf("Cannot Publish messages, %v", err)
+	}
 }
