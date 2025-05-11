@@ -72,7 +72,7 @@ func SubscribeJSON[T any](
     queueName,
     key string,
     simpleQueueType int, 
-    handler func(T),
+    handler func(T) routing.AckType,
 ) error {
     ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
     if err != nil {
@@ -99,8 +99,14 @@ func SubscribeJSON[T any](
                 _ = delivery.Ack(false)
                 continue
             }
-            handler(msg)
-            _ = delivery.Ack(false)
+            switch handler(msg){
+            case routing.Ack:
+                _ = delivery.Ack(false)
+            case routing.NackRequeue:
+                _ = delivery.Nack(false, true)
+            case routing.NackDiscard:
+                _ = delivery.Nack(false, false)
+            }
         }
     }()
 
