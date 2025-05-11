@@ -28,6 +28,21 @@ func main() {
 	}
 	defer msg.Close()
 
+    logsQueueName := routing.GameLogSlug
+    logsRoutingKey := routing.GameLogSlug + ".*"
+    logsCh, logsQueue, err := pubsub.DeclareAndBind(
+        conn,
+        routing.ExchangePerilTopic,
+        logsQueueName,
+        logsRoutingKey,
+        routing.QueueTypeDurable,
+    )
+    if err != nil {
+        log.Fatalf("Failed to declare and bind logs queue: %v", err)
+    }
+    defer logsCh.Close()
+    fmt.Printf("Queue %s created and bound to exchange %s with key %s\n", logsQueue.Name, routing.ExchangePerilTopic, logsRoutingKey)
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	

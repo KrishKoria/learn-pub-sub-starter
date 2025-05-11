@@ -63,3 +63,46 @@ func DeclareAndBind(
 
     return ch, newQueue, nil
 }
+
+
+
+func SubscribeJSON[T any](
+    conn *amqp.Connection,
+    exchange,
+    queueName,
+    key string,
+    simpleQueueType int, 
+    handler func(T),
+) error {
+    ch, queue, err := DeclareAndBind(conn, exchange, queueName, key, simpleQueueType)
+    if err != nil {
+        return fmt.Errorf("failed to declare and bind queue: %w", err)
+    }
+
+    msgs, err := ch.Consume(
+        queue.Name,
+        "",    // consumer (auto-generated)
+        false, // autoAck
+        false, // exclusive
+        false, // noLocal
+        false, // noWait
+        nil,   // args
+    )
+    if err != nil {
+        return fmt.Errorf("failed to start consuming: %w", err)
+    }
+
+    go func() {
+        for delivery := range msgs {
+            var msg T
+            if err := json.Unmarshal(delivery.Body, &msg); err != nil {
+                _ = delivery.Ack(false)
+                continue
+            }
+            handler(msg)
+            _ = delivery.Ack(false)
+        }
+    }()
+
+    return nil
+}

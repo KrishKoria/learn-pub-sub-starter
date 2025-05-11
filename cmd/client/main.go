@@ -27,6 +27,8 @@ func main() {
     }
     queuename := routing.PauseKey + "." + name
 
+    moveRoutingKey := routing.ArmyMovesPrefix + "." + "*"
+    moveQueuename := routing.ArmyMovesPrefix + "." + name
     ch, queue, err := pubsub.DeclareAndBind(
         conn,
         routing.ExchangePerilDirect,
@@ -41,6 +43,29 @@ func main() {
     fmt.Printf("Queue %s created and bound to exchange %s with key %s\n", queue.Name, routing.ExchangePerilDirect, routing.PauseKey)
 
     gameState := gamelogic.NewGameState(name)
+    err = pubsub.SubscribeJSON(
+        conn,
+        string(routing.ExchangePerilDirect),
+        queuename,
+        string(routing.PauseKey),
+        int(routing.QueueTypeTransient),
+        handlerPause(gameState),
+    )
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
+
+    err = pubsub.SubscribeJSON(
+        conn,
+        string(routing.ExchangePerilTopic),
+        moveQueuename,
+        moveRoutingKey,
+        int(routing.QueueTypeTransient),
+        handlerMove,
+    )
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }
 
     signalChan := make(chan os.Signal, 1)
     signal.Notify(signalChan, os.Interrupt)
@@ -73,5 +98,19 @@ func main() {
                 fmt.Println("Unknown command:", words[0])
             }
         }
+    }
+}
+
+func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
+    return func(state routing.PlayingState) {
+        defer fmt.Print("> ")
+        gs.HandlePause(state)
+    }
+}
+
+func handlerMove(gs *gamelogic.GameState) func(routing.ArmyMove) {
+    return func(move routing.ArmyMove) {
+        defer fmt.Print("> ")
+        gs.HandleMove(move)
     }
 }
