@@ -61,7 +61,7 @@ func main() {
         moveQueuename,
         moveRoutingKey,
         int(routing.QueueTypeTransient),
-        handlerMove,
+        handlerMove(gameState),
     )
     if err != nil {
         log.Fatalf("Error: %v", err)
@@ -84,7 +84,17 @@ func main() {
             case "spawn":
                 gameState.CommandSpawn(words)
             case "move":
-                gameState.CommandMove(words)
+                move, err := gameState.CommandMove(words)
+                if err != nil {
+                    log.Fatalf("Error: %v", err)
+                }
+                routingKey := routing.ArmyMovesPrefix + "." + name
+                err = pubsub.PublishJSON(ch, routing.ExchangePerilTopic, routingKey, move)
+                if err != nil {
+                    fmt.Println("Failed to publish move:", err)
+                } else {
+                    fmt.Println("Move published successfully!")
+                }
             case "status":
                 gameState.CommandStatus()
             case "help":
@@ -108,8 +118,8 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
     }
 }
 
-func handlerMove(gs *gamelogic.GameState) func(routing.ArmyMove) {
-    return func(move routing.ArmyMove) {
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+    return func(move gamelogic.ArmyMove) {
         defer fmt.Print("> ")
         gs.HandleMove(move)
     }
