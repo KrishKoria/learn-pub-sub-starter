@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"time"
 
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/bootdotdev/learn-pub-sub-starter/internal/pubsub"
@@ -75,7 +76,7 @@ func main() {
         warQueueName,
         warRoutingKey,
         int(routing.QueueTypeDurable),
-        handlerWar(gameState),
+        handlerWar(ch, gameState),
     )
     if err != nil {
         log.Fatalf("Error: %v", err)
@@ -162,10 +163,12 @@ func handlerMove(publishCh *amqp.Channel, gs *gamelogic.GameState) func(gamelogi
 }
 
 
-func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) routing.AckType {
+func handlerWar(publishCh *amqp.Channel, gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) routing.AckType {
     return func(war gamelogic.RecognitionOfWar) routing.AckType {
         defer fmt.Print("> ")
-        outcome, _, _:= gs.HandleWar(war)
+        outcome, winner, loser:= gs.HandleWar(war)
+        var logMessage string 
+        var ackTypeForWarMessage routing.AckType
         switch outcome {
             case gamelogic.WarOutcomeNotInvolved:
                 fmt.Println("You are not involved in this war.")
@@ -175,16 +178,34 @@ func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) routin
                 return routing.NackDiscard
             case gamelogic.WarOutcomeOpponentWon:
                 fmt.Println("You lost the war.")
-                return routing.Ack
+                logMessage = fmt.Sprintf("%s won the war against %s", winner, winner)
+                ackTypeForWarMessage = routing.Ack
             case gamelogic.WarOutcomeYouWon:
                 fmt.Println("You won the war!")
-                return routing.Ack
+                logMessage = fmt.Sprintf("%s won the war against %s", winner, loser)
+                ackTypeForWarMessage = routing.Ack
             case gamelogic.WarOutcomeDraw:
                 fmt.Println("The war ended in a draw.")
-                return routing.Ack
+                logMessage = fmt.Sprintf("The war between %s and %s ended in a draw", winner, loser)
+                ackTypeForWarMessage = routing.Ack
             default:
                 fmt.Println("Unknown war outcome.")
                 return routing.NackDiscard
         }
+        if logMessage != "" {
+            gameLog := routing.GameLog{
+                CurrentTime: time.Now(),
+                Message:      logMessage,
+                Username: war.Attacker.Username,
+            }
+            logRoutingKey := fmt.Sprintf("%s.%s", routing.GameLogSlug, war.Attacker.Username)
+            err := pubsub.PublishGOB(publishCh, routing.ExchangePerilTopic, logRoutingKey, gameLog)
+            if err != nil {
+                fmt.Println("Failed to publish game log:", err)
+                return routing.NackRequeue
+            }
+            log.Printf("Game log published successfully: %s", logMessage)
     }
+        return ackTypeForWarMessage
+}
 }

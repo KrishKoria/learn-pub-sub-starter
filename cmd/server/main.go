@@ -22,32 +22,34 @@ func main() {
 	}
 	defer conn.Close()
 	fmt.Println("Connected to RabbitMQ")
-	msg, err := conn.Channel()
+
+
+	publishCh, err := conn.Channel()
 	if err != nil {
 		log.Fatalf("Cannot Open Message channel")
 	}
-	defer msg.Close()
+	defer publishCh.Close()
 
     logsQueueName := routing.GameLogSlug
-    logsRoutingKey := routing.GameLogSlug + ".*"
-    logsCh, logsQueue, err := pubsub.DeclareAndBind(
+    logsRoutingKey := fmt.Sprintf("%s.*", routing.GameLogSlug)
+
+    err = pubsub.SubscribeGob(
         conn,
-        routing.ExchangePerilTopic,
+        string(routing.ExchangePerilTopic),
         logsQueueName,
         logsRoutingKey,
-        routing.QueueTypeDurable,
+        int(routing.QueueTypeDurable),
+        handleLog,
     )
     if err != nil {
-        log.Fatalf("Failed to declare and bind logs queue: %v", err)
-    }
-    defer logsCh.Close()
-    fmt.Printf("Queue %s created and bound to exchange %s with key %s\n", logsQueue.Name, routing.ExchangePerilTopic, logsRoutingKey)
-
+		log.Fatalf("Cannot Open Message channel")
+	}
+    
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	
 	gamelogic.PrintServerHelp()
-	loop:
+loop:
     for {
         select {
         case <-sigChan:
@@ -61,10 +63,10 @@ func main() {
             switch words[0] {
             case "pause":
                 log.Println("Sending pause message")
-                sendMessage(msg, true)
+                sendMessage(publishCh, true)
             case "resume":
                 log.Println("Sending resume message")
-                sendMessage(msg, false)
+                sendMessage(publishCh, false)
             case "quit":
                 log.Println("Exiting...")
                 break loop
@@ -76,9 +78,16 @@ func main() {
 }
 
 
+func handleLog(logEntry routing.GameLog) routing.AckType {
+    defer fmt.Print("> ")
+    gamelogic.WriteLog(logEntry)
+    return routing.Ack
+}
+
+
 func sendMessage(channel *amqp.Channel, state bool) {
 	err := pubsub.PublishJSON(channel, string(routing.ExchangePerilDirect), string(routing.PauseKey), routing.PlayingState{IsPaused: state})
 	if err != nil {
-		log.Fatalf("Cannot Publish messages, %v", err)
+		log.Printf("Cannot Publish messages, %v", err)
 	}
 }
