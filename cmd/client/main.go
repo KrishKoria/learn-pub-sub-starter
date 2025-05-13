@@ -61,7 +61,21 @@ func main() {
         moveQueuename,
         moveRoutingKey,
         int(routing.QueueTypeTransient),
-        handlerMove(gameState),
+        handlerMove(ch, gameState),
+    )
+    if err != nil {
+        log.Fatalf("Error: %v", err)
+    }   
+
+    warRoutingKey := fmt.Sprintf("%s.*", routing.WarRecognitionsPrefix)
+    warQueueName := "war"
+    err = pubsub.SubscribeJSON(
+        conn,
+        string(routing.ExchangePerilTopic),
+        warQueueName,
+        warRoutingKey,
+        int(routing.QueueTypeDurable),
+        handlerWar(gameState),
     )
     if err != nil {
         log.Fatalf("Error: %v", err)
@@ -119,16 +133,58 @@ func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) routing.Ac
     }
 }
 
-func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) routing.AckType {
+func handlerMove(publishCh *amqp.Channel, gs *gamelogic.GameState) func(gamelogic.ArmyMove) routing.AckType {
     return func(move gamelogic.ArmyMove) routing.AckType {
         defer fmt.Print("> ")
         outcome := gs.HandleMove(move)
-        if outcome == gamelogic.MoveOutComeSafe || outcome == gamelogic.MoveOutcomeMakeWar {
+        switch outcome {
+        case gamelogic.MoveOutComeSafe:
             return routing.Ack
-        }
-        if outcome == gamelogic.MoveOutcomeSamePlayer {
+        case gamelogic.MoveOutcomeMakeWar:
+            warmsg := gamelogic.RecognitionOfWar{
+                Attacker: move.Player,
+                Defender: gs.GetPlayerSnap(),
+            }
+            warRoutingKey := fmt.Sprintf("%s.%s", routing.WarRecognitionsPrefix, gs.GetUsername())
+            err := pubsub.PublishJSON(publishCh, routing.ExchangePerilTopic, warRoutingKey, warmsg)
+            if err != nil {
+                fmt.Println("Failed to publish war recognition:", err)
+                return routing.NackRequeue
+            }
+            fmt.Println("War recognition published successfully!")
+            return routing.Ack
+        case gamelogic.MoveOutcomeSamePlayer:
             return routing.NackDiscard
+        default:
+            return routing.NackDiscard
+    }
+}
+}
+
+
+func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) routing.AckType {
+    return func(war gamelogic.RecognitionOfWar) routing.AckType {
+        defer fmt.Print("> ")
+        outcome, _, _:= gs.HandleWar(war)
+        switch outcome {
+            case gamelogic.WarOutcomeNotInvolved:
+                fmt.Println("You are not involved in this war.")
+                return routing.NackRequeue
+            case gamelogic.WarOutcomeNoUnits:
+                fmt.Println("No units in the same location. No war will be fought.")
+                return routing.NackDiscard
+            case gamelogic.WarOutcomeOpponentWon:
+                fmt.Println("You lost the war.")
+                return routing.Ack
+            case gamelogic.WarOutcomeYouWon:
+                fmt.Println("You won the war!")
+                return routing.Ack
+            case gamelogic.WarOutcomeDraw:
+                fmt.Println("The war ended in a draw.")
+                return routing.Ack
+            default:
+                fmt.Println("Unknown war outcome.")
+                return routing.NackDiscard
         }
-        return routing.NackDiscard
     }
 }
